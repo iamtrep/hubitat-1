@@ -278,6 +278,8 @@ void updated(){
     if(debugEnable)
         runIn(1800,"logsOff")
 
+    scheduledUpdateHtmlTemplate()
+
     if(htmlOutput == null)
         device.updateSetting("htmlOutput",[value:"hubInfoOutput.html",type:"string"])
     device.updateSetting("htmlOutput",[value:toCamelCase(htmlOutput),type:"string"])
@@ -1296,7 +1298,7 @@ void hiaUpdate(htmlStr) {
 
 def scheduledUpdateHtmlTemplate() {
     updateHtmlTemplate()
-    runIn(300, scheduledUpdateHtmlTemplate)
+    runIn(3600, scheduledUpdateHtmlTemplate)
 }
 
 def updateHtmlTemplate() {
