@@ -57,7 +57,7 @@ void updated(){
     unschedule()
 	if(debugEnable) runIn(1800,logsOff)
     updateHtmlTemplate()
-    runIn(300, scheduledUpdateHtmlTemplate)
+    runIn(3600, scheduledUpdateHtmlTemplate)
 }
 
 void initialize(){
@@ -169,7 +169,7 @@ def previewTemplate(){
 
 def scheduledUpdateHtmlTemplate() {
     updateHtmlTemplate()
-    runIn(300, scheduledUpdateHtmlTemplate)
+    runIn(3600, scheduledUpdateHtmlTemplate)
 }
 
 def updateHtmlTemplate() {

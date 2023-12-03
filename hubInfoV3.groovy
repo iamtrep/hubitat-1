@@ -61,6 +61,8 @@ import groovy.transform.Field
 @SuppressWarnings('unused')
 static String version() {return "3.0.31"}
 
+@Field static final String htmlTemplateCache = null
+
 metadata {
     definition (
         name: "Hub Information Driver v3",
@@ -275,6 +277,8 @@ void updated(){
 		runIn(pollRate4*60*60, "poll4")
     if(debugEnable)
         runIn(1800,"logsOff")
+
+    scheduledUpdateHtmlTemplate()
 
     if(htmlOutput == null)
         device.updateSetting("htmlOutput",[value:"hubInfoOutput.html",type:"string"])
@@ -1292,17 +1296,34 @@ void hiaUpdate(htmlStr) {
 	updateAttr("html",htmlStr)
 }
 
-void createHtml(){
+def scheduledUpdateHtmlTemplate() {
+    updateHtmlTemplate()
+    runIn(3600, scheduledUpdateHtmlTemplate)
+}
+
+def updateHtmlTemplate() {
     if(alternateHtml == null || fileExists("$alternateHtml") == false){
         xferFile("https://raw.githubusercontent.com/thebearmay/hubitat/main/hubInfoTemplate.res","hubInfoTemplate.res")
         device.updateSetting("alternateHtml",[value:"hubInfoTemplate.res", type:"string"])
     }
-    String fContents = readFile("$alternateHtml")
-    if(fContents == 'null' || fContents == null) {
+    htmlTemplateCache = readFile("$alternateHtml")
+    if(htmlTemplateCache == 'null' || htmlTemplateCache == null) {
         xferFile("https://raw.githubusercontent.com/thebearmay/hubitat/main/hubInfoTemplate.res","hubInfoTemplate.res")
         device.updateSetting("alternateHtml",[value:"hubInfoTemplate.res", type:"string"])
-        fContents = readFile("$alternateHtml")
+        htmlTemplateCache = readFile("$alternateHtml")
     }
+}
+
+def getHtmlTemplateCache(forceUpdate = false) {
+    if (!htmlTemplateCache || forceUpdate) {
+        updateHtmlTemplate()
+    }
+    //log.debug "template cache: ${htmlTemplateCache}"
+    return htmlTemplateCache
+}
+
+void createHtml(){
+    String fContents = getHtmlTemplateCache()
     List fRecs=fContents.split("\n")
     String html = ""
     fRecs.each {
