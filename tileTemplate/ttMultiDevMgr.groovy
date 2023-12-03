@@ -19,12 +19,16 @@
  *    2023-09-20        thebearmay    Security screen lock issue
 */
 
+import groovy.transform.Field
+
 static String version()	{  return '0.1.1'  }
+
+@Field static final String htmlTemplateCache = null
 
 
 definition (
-	name: 			"Tile Multi-Device Template Manager", 
-	namespace: 		"thebearmay", 
+	name: 			"Tile Multi-Device Template Manager",
+	namespace: 		"thebearmay",
 	author: 		"Jean P. May, Jr.",
 	description: 	"Use a template file to generate an HTML element for multiple named devices.",
 	category: 		"Utility",
@@ -34,7 +38,7 @@ definition (
     singleThreaded: true,
     iconUrl:        "",
     iconX2Url:      ""
-) 
+)
 
 preferences {
     page name: "mainPage"
@@ -50,7 +54,10 @@ void installed() {
 void updated(){
 //	log.trace "updated()"
     if(!state?.isInstalled) { state?.isInstalled = true }
+    unschedule()
 	if(debugEnable) runIn(1800,logsOff)
+    updateHtmlTemplate()
+    runIn(300, scheduledUpdateHtmlTemplate)
 }
 
 void initialize(){
@@ -62,22 +69,22 @@ void logsOff(){
 
 def mainPage(){
     dynamicPage (name: "mainPage", title: "<h3 style='color:blue'>${app.getLabel()}<br /><span style='font-size:small'>v${version()}</span></h3>", install: true, uninstall: true) {
-      	if (app.getInstallationState() == 'COMPLETE') {   
+      	if (app.getInstallationState() == 'COMPLETE') {
 	    	section("Main") {
-                
+
                 state.validTemplate = false
-                List<String> fList 
+                List<String> fList
                 input "mustContain", "string", title:"Filter to Templates that contain", required:false, submitOnUpdate: true, width:4
-                input "applyFilter", "button", title: "Apply Filter"                
+                input "applyFilter", "button", title: "Apply Filter"
                 if(state.afPushed) {
                     state.afPushed = false
                 }
-             
+
                 if(mustContain != null)
                     fList = listFiles("$mustContain")
                 else
                     fList = listFiles()
-                
+
                 input "templateName", "enum", title: "<b>Template to Process</b>", required: false, width:5, submitOnUpdate:true, options:fList
                 input "templateCheck", "button", title:"Check Template"
                 if(templateName != null && state?.tCheck == true) {
@@ -106,7 +113,7 @@ def mainPage(){
                 }
                 HashMap varMap = getAllGlobalVars()
                 List varListIn = []
-                
+
                 varMap.each {
                     varListIn.add("$it.key")
                 }
@@ -117,7 +124,7 @@ def mainPage(){
                         var="variable:$it"
                         subscribe(location,"$var", "altHtml")
                         success = addInUseGlobalVar(it.toString())
-                    }                   
+                    }
                 }
 
                 input "clearSettings", "button", title: "Clear previous settings"
@@ -131,9 +138,9 @@ def mainPage(){
                     state.clearAll = false
                 }
                 if(!this.getChildDevice("ttdm${app.id}"))
-                    addChildDevice("thebearmay","Generic HTML Device","ttdm${app.id}", [name: "HTML Tile Device${app.id}", isComponent: true, label:"HTML Tile Device${app.id}"]) 
+                    addChildDevice("thebearmay","Generic HTML Device","ttdm${app.id}", [name: "HTML Tile Device${app.id}", isComponent: true, label:"HTML Tile Device${app.id}"])
                 input "security", "bool", title: "Hub Security Enabled", defaultValue: false, submitOnChange: true, width:4
-                if (security) { 
+                if (security) {
                     input("username", "string", title: "Hub Security Username", required: false)
                     input("password", "password", title: "Hub Security Password", required: false)
                 }
@@ -141,7 +148,7 @@ def mainPage(){
              section("Change Application Name", hideable: true, hidden: true){
                input "nameOverride", "text", title: "New Name for Application", multiple: false, required: false, submitOnChange: true, defaultValue: app.getLabel()
                if(nameOverride != app.getLabel) app.updateLabel(nameOverride)
-             }  
+             }
 	    } else {
 		    section("") {
 			    paragraph title: "Click Done", "Please click Done to install app before continuing"
@@ -154,14 +161,35 @@ def previewTemplate(){
     dynamicPage (name: "previewTemplate", title: "Template Preview", install: false, uninstall: false) {
 	  section(""){
           html = altHtml()
-          paragraph "${html}"      
+          paragraph "${html}"
       }
     }
 }
 
+
+def scheduledUpdateHtmlTemplate() {
+    updateHtmlTemplate()
+    runIn(300, scheduledUpdateHtmlTemplate)
+}
+
+def updateHtmlTemplate() {
+    //log.debug "updating HTML template file $templateName from File Manager"
+    if(templateName == null) return null
+    htmlTemplateCache = readFile("$templateName")
+}
+
+def getHtmlTemplateCache(forceUpdate = false) {
+    if (!htmlTemplateCache || forceUpdate) {
+        updateHtmlTemplate()
+    }
+    //log.debug "template cache: ${htmlTemplateCache}"
+    return htmlTemplateCache
+}
+
 List templateScan() {
     if(templateName == null) return []
-    String fContents = readFile("$templateName")
+    //String fContents = readFile("$templateName")
+    String fContents = getHtmlTemplateCache(true)
     List fRecs=fContents.split("\n")
     List devList =[]
     fRecs.each {
@@ -183,13 +211,14 @@ List templateScan() {
             }
         }
     }
-    
+
     return devList.unique()
 }
 
 String altHtml(evt = "") {
     //log.debug "altHtml $evt.properties"
-    String fContents = readFile("$templateName")
+    //String fContents = readFile("$templateName")
+    String fContents = getHtmlTemplateCache(true)
     if (fContents == null) return
     List fRecs=fContents.split("\n")
     String html = ""
@@ -236,13 +265,13 @@ String altHtml(evt = "") {
                     if(it.indexOf("%>")+2 != it.length()) {
                         html+=it.substring(it.indexOf("%>")+2)
                     }
-                }                 
+                }
             }
         }
         else html += it
     }
     if (!evt) return html
-        
+
     chd = getChildDevice("ttdm${app.id}")
     chd.sendEvent(name:"html1", value:html)
     return null
@@ -269,14 +298,14 @@ String readFile(fName){
 
     try {
         httpGet(params) { resp ->
-            if(resp!= null) {       
+            if(resp!= null) {
                int i = 0
                String delim = ""
-               i = resp.data.read() 
+               i = resp.data.read()
                while (i != -1){
                    char c = (char) i
                    delim+=c
-                   i = resp.data.read() 
+                   i = resp.data.read()
                }
                if(debugEnabled) log.info "File Read Data: $delim"
                return delim
@@ -300,7 +329,7 @@ List<String> listFiles(filt = null){
         uri: uri,
         headers: [
 				"Cookie": cookie
-            ]        
+            ]
     ]
     try {
         fileList = []
@@ -341,8 +370,8 @@ String getCookie(){
 			submit: "Login"
 			]
 		]
-	  ) { resp -> 
-		cookie = ((List)((String)resp?.headers?.'Set-Cookie')?.split(';'))?.getAt(0) 
+	  ) { resp ->
+		cookie = ((List)((String)resp?.headers?.'Set-Cookie')?.split(';'))?.getAt(0)
         if(debugEnable)
             log.debug "$cookie"
 	  }
@@ -365,7 +394,7 @@ def appButtonHandler(btn) {
             state.afPushed = true
             mainPage()
             break
-        default: 
+        default:
             log.error "Undefined button $btn pushed"
             break
     }

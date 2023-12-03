@@ -16,15 +16,18 @@
  *    2022-08-30        thebearmay    add file list for templates
  *    2022-09-05        thebearmay    add @room
  *    2023-01-05        thebearmay    Add filter option for template assignment
- *    2023-01-23	thebearmay    change to singlethreaded to minimize number of files open 
+ *    2023-01-23        thebearmay    change to singlethreaded to minimize number of files open
 */
+import groovy.transform.Field
 
 static String version()	{  return '0.0.8'  }
 
+@Field static final Map htmlTemplateCache = [:]
+
 
 definition (
-	name: 			"Tile Template Device Manager", 
-	namespace: 		"thebearmay", 
+	name: 			"Tile Template Device Manager",
+	namespace: 		"thebearmay",
 	author: 		"Jean P. May, Jr.",
 	description: 	"Use a template file to generate an HTML element for any device.",
 	category: 		"Utility",
@@ -34,7 +37,7 @@ definition (
 	oauth: 			false,
     iconUrl:        "",
     iconX2Url:      ""
-) 
+)
 
 preferences {
     page name: "mainPage"
@@ -50,7 +53,9 @@ void installed() {
 void updated(){
 //	log.trace "updated()"
     if(!state?.isInstalled) { state?.isInstalled = true }
+    unschedule()
 	if(debugEnable) runIn(1800,logsOff)
+    scheduledUpdateHtmlTemplate()
 }
 
 void initialize(){
@@ -62,14 +67,14 @@ void logsOff(){
 
 def mainPage(){
     dynamicPage (name: "mainPage", title: "", install: true, uninstall: true) {
-      	if (app.getInstallationState() == 'COMPLETE') {   
+      	if (app.getInstallationState() == 'COMPLETE') {
 	    	section("Main") {
                 state.saveReq = false
                 input "qryDevice", "capability.*", title: "Devices of Interest:", multiple: true, required: true, submitOnChange: true
-                if (qryDevice != null){        
+                if (qryDevice != null){
                     href "templateSelect", title: "Assign Templates to Devices", required: false
                     input "checkSubs", "button", title: "Check Subscriptions", width:4
-                    if(state.checkSubsPushed == true){ 
+                    if(state.checkSubsPushed == true){
                         state.checkSubsPushed = false
                         paragraph "${state.message}"
 			    if(debugEnable) log.debug "${state.message}"
@@ -88,9 +93,9 @@ def mainPage(){
                 }
                 input "debugEnable", "bool", title: "Enable Debug Logs", submitOnChange:true
                 if(!this.getChildDevice("ttdm${app.id}"))
-                    addChildDevice("thebearmay","Generic HTML Device","ttdm${app.id}", [name: "HTML Tile Device${app.id}", isComponent: true, label:"HTML Tile Device${app.id}"])                
+                    addChildDevice("thebearmay","Generic HTML Device","ttdm${app.id}", [name: "HTML Tile Device${app.id}", isComponent: true, label:"HTML Tile Device${app.id}"])
                 input "security", "bool", title: "Hub Security Enabled", defaultValue: false, submitOnChange: true, width:4
-                if (security) { 
+                if (security) {
                     input("username", "string", title: "Hub Security Username", required: false)
                     input("password", "password", title: "Hub Security Password", required: false)
                 }
@@ -98,7 +103,7 @@ def mainPage(){
             section("Change Application Name", hideable: true, hidden: true){
                input "nameOverride", "text", title: "New Name for Application", multiple: false, required: false, submitOnChange: true, defaultValue: app.getLabel()
                if(nameOverride != app.getLabel) app.updateLabel(nameOverride)
-            }  
+            }
 	    } else {
 		    section("") {
 			    paragraph title: "Click Done", "Please click Done to install app before continuing"
@@ -113,13 +118,13 @@ def templateSelect(){
           unsubscribe()
           int i = 1
 
-          List<String> fList 
+          List<String> fList
           input "mustContain", "string", title:"Filter to Templates that contain", required:false, submitOnUpdate: true, width:4
           input "applyFilter", "button", title: "Apply Filter"
           if(state.afPushed) {
             state.afPushed = false
           }
-             
+
           if(mustContain != null)
               fList = listFiles("$mustContain")
           else
@@ -163,6 +168,37 @@ void clearMessage(){
     state.message=null
 }
 
+def scheduledUpdateHtmlTemplate() {
+    updateHtmlTemplate(null)
+    runIn(3600, scheduledUpdateHtmlTemplate)
+}
+
+def updateHtmlTemplate(deviceId = null) {
+    if (deviceId == null) {
+        qryDevice.each{
+            def fName = settings["template${it.deviceId}"]
+            //log.debug "${it.deviceId} $fName"
+            if (fName) {
+                htmlTemplateCache[it.deviceId] = readFile("$fName")
+            }
+        }
+    } else {
+        def fName = settings["template${deviceId}"]
+        if(fName) {
+            //log.debug "${deviceId} $fName"
+            htmlTemplateCache[deviceId] = readFile("$fName")
+        }
+    }
+}
+
+def getHtmlTemplateCache(deviceId, forceUpdate = false) {
+    if (forceUpdate || !htmlTemplateCache[deviceId]) {
+        updateHtmlTemplate(deviceId)
+    }
+    //log.debug "template cache: ${htmlTemplateCache[deviceId]}"
+    return htmlTemplateCache[deviceId]
+}
+
 void altHtml(evt) {
     //log.debug "Device Id ${evt.deviceId}"
 
@@ -170,8 +206,9 @@ void altHtml(evt) {
         if(it.deviceId == evt.deviceId) dev=it
     }
     //log.debug "${settings["template${evt.deviceId}"]}"
-    
-    String fContents = readFile("${settings["template${evt.deviceId}"]}")
+
+    //String fContents = readFile("${settings["template${evt.deviceId}"]}")
+    String fContents = getHtmlTemplateCache(evt.deviceId)
     List fRecs=fContents.split("\n")
     String html = ""
     //if(debugEnable) log.debug "Template has ${fRec.size()} records"
@@ -205,7 +242,7 @@ void altHtml(evt) {
                         if(debugEnable) log.debug "${it.substring(it.indexOf("%>")+2)}"
                         html+=it.substring(it.indexOf("%>")+2)
                     }
-                }                 
+                }
             }
         }
         else html += it
@@ -220,7 +257,7 @@ void altHtml(evt) {
 void refreshSlot(sNum) {
     settings.each {
         if(it.key.indexOf("slot") > -1){
-            //log.debug "${it.key} ${it.value} $sNum" 
+            //log.debug "${it.key} ${it.value} $sNum"
             if(it.value == sNum){
                 //log.debug "${it.key.substring(4).toLong()}"
                 altHtml([deviceId:it.key.substring(4).toLong()])
@@ -246,14 +283,14 @@ String readFile(fName){
 
     try {
         httpGet(params) { resp ->
-            if(resp!= null) {       
+            if(resp!= null) {
                int i = 0
                String delim = ""
-               i = resp.data.read() 
+               i = resp.data.read()
                while (i != -1){
                    char c = (char) i
                    delim+=c
-                   i = resp.data.read() 
+                   i = resp.data.read()
                }
                if(debugEnabled) log.info "File Read Data: $delim"
                return delim
@@ -278,7 +315,7 @@ List<String> listFiles(filt = null){
         uri: uri,
         headers: [
 				"Cookie": cookie
-            ]        
+            ]
     ]
     try {
         fileList = []
@@ -319,8 +356,8 @@ String getCookie(){
 			submit: "Login"
 			]
 		]
-	  ) { resp -> 
-		cookie = ((List)((String)resp?.headers?.'Set-Cookie')?.split(';'))?.getAt(0) 
+	  ) { resp ->
+		cookie = ((List)((String)resp?.headers?.'Set-Cookie')?.split(';'))?.getAt(0)
         if(debugEnable)
             log.debug "$cookie"
 	  }
@@ -348,7 +385,7 @@ def appButtonHandler(btn) {
             state.afPushed = true
             templateSelect()
             break
-        default: 
+        default:
             log.error "Undefined button $btn pushed"
             break
     }
