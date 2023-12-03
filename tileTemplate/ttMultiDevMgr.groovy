@@ -283,6 +283,10 @@ void refreshSlot(sNum) {
 
 @SuppressWarnings('unused')
 String readFile(fName){
+    if(currentVersionGTEQ("2.3.4.132")){
+        return new String(downloadHubFile(fName))
+    }
+
     if(security) cookie = getCookie()
     uri = "http://${location.hub.localIP}:8080/local/${fName}"
 
@@ -402,4 +406,30 @@ def appButtonHandler(btn) {
 
 void intialize() {
 
+}
+
+@SuppressWarnings('unused')
+def currentVersionMoreRecentThan(version) {
+    return compareVersions(location.hub.firmwareVersionString, version) > 0
+}
+
+@SuppressWarnings('unused')
+def currentVersionGTEQ(version) {
+    return compareVersions(location.hub.firmwareVersionString, version) >= 0
+}
+
+@SuppressWarnings('unused')
+def compareVersions(version1,version2) {
+    def v1 = version1.tokenize('.').collect { it as Integer }
+    def v2 = version2.tokenize('.').collect { it as Integer }
+
+    // Compare each level of the version numbers
+    for (int i = 0; i < Math.min(v1.size(), v2.size()); i++) {
+        def compareResult = v1[i] <=> v2[i]
+        if (compareResult != 0) {
+            return compareResult
+        }
+    }
+    // If all levels are equal, compare the length of version numbers
+    return v1.size() <=> v2.size()
 }
