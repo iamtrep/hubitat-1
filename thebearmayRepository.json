@@ -3,17 +3,6 @@
   "gitHubUrl": "https://github.com/thebearmay/hubitat",
   "packages": [
     {
-      "id": "95a9ea0a-ce4a-42a1-bd56-2860c6766367",
-      "name": "Hubitat Hub Information Device",
-      "category": "Convenience",
-      "location": "https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/hubInfoManifest.json",
-      "description": "Device driver that provides access to the basic hub and location information about the hub.  Has an option to allow polling to report hub temperature and memory.",
-      "tags": [
-        "Misc. Devices",
-        "Monitoring"
-      ]
-    },
-    {
       "id": "812cb3c9-3b67-47f4-aac2-05dc85e0e505",
       "name": "Notification Tile Device",
       "category": "Convenience",
@@ -32,13 +21,6 @@
       "tags": [
         "Misc. Devices"
       ]
-    },
-    {
-      "id": "10e2afdc-0dee-429a-b5fd-24d884d5b917",
-      "name": "HubConnect Hub Information Driver",
-      "category": "Integrations",
-      "location": "https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/hubInfo-HubConnectManifest.json",
-      "description": "Hub Information Driver stub for HubConnect v2"
     },
     {
       "id": "dc44dda5-e732-4c3d-9eea-f4efec8f7d3f",
@@ -132,13 +114,6 @@
       "category": "Utility",
       "location": "https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/webScrapeManifest.json",
       "description": "Scrapes a web site for a search string and returns data based on offset of the search.  Can be run as a one time or a periodic search"
-    },
-    {
-      "id": "faa4f184-0453-4617-a13f-32c15695481f",
-      "name": "Daikin Thermostat",
-      "category": "Integrations",
-      "location": "https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/daiThermManifest.json",
-      "description": "Device driver for the Daikin OnePlus Thermostat."
     },
     {
       "id": "4e5e5aa6-2495-4826-b4d5-43543b30922d",
@@ -311,6 +286,27 @@
       "tags":[
         "Automations & Groups",
         "Multi Sensors",
+        "Tools & Utilities"
+       ]
+    },
+    {
+      "id":"69a499bc-f667-4092-a1dd-ec210cb221e6",
+      "name":"Hubitat Log Display Tile",
+      "category":"Notifications",
+      "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/logTileManifest.json",
+      "description":"Creates a dashboard tile to display Hubitat Log information",
+      "tags":[
+        "Dashboards"
+       ]
+    },
+    {
+      "id":"dbafc780-234d-4ef8-b01e-62b639559bd1",
+      "name":"Device Attribute Iterative Storage ",
+      "category":"Utility",
+      "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/devAttIterStoManifest.json",
+      "description":"Maintains a set number of iterations of attribute and computed min/max/avg values in the Hubitat Local File Manager.",
+      "tags":[
+        "Monitoring",
         "Tools & Utilities"
        ]
     }

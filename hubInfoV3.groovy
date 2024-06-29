@@ -52,6 +52,18 @@
  *    2023-10-24                 v3.0.29 - HE 2.3.7.x zigbee endpoint change
  *    2023-10-24                 v3.0.30 - Add Matter attributes
  *    2023-11-14                 v3.0.31 - Suppress error on extended Zigbee/Matter reads if hub not ready
+ *    2023-11-27                 v3.0.32 - Reboot with Rebuild Option
+ *    2024-01-05                 v3.0.33 - Use file methods instead of endpoints if available
+ *                               v3.0.34 - Reboot with Log Purge, Rebuild changes
+ *    2024-01-09                 v3.0.35 - Allow Matter attributes for C-5, C-7, and C-8
+ *				                 v3.0.36 - Allow C-8 Pro to pass Compatibility checks
+ *    2024-03-07                 v3.0.37 - add /hub/advanced/zipgatewayVersion endpoint
+ *    2024-03-19                 v3.0.38 - add pCloud (passive cloud check)
+ *    2024-03-28                 v3.0.39 - add GB option for memory display
+ *                               v3.0.40 - Dynamic unit option for memory display
+ *    2024-04-16                 v3.0.41 - lanspeed source change
+ *.   2024-05-07                 v3.0.42 - fix C8 Pro failing Matter compatibility check
+ *    2024-06-08                 v3.0.43 - Add a delayed base data check on initialization
 */
 import java.text.SimpleDateFormat
 import groovy.json.JsonOutput
@@ -59,7 +71,7 @@ import groovy.json.JsonSlurper
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "3.0.31"}
+static String version() {return "3.0.43"}
 
 metadata {
     definition (
@@ -142,6 +154,7 @@ metadata {
         attribute "cpu15Pct", "number"
         attribute "freeMem15", "number"
         attribute "cloud", "string"
+        attribute "pCloud", "string"
         attribute "dnsStatus", "string"
         attribute "lanSpeed", "string"
         attribute "zigbeePower", "number"
@@ -149,9 +162,12 @@ metadata {
         attribute "zigbeeExtPan", "string"
         attribute "matterEnabled", "string"
         attribute "matterStatus", "string"
+        attribute "releaseNotesUrl", "string"
 
         command "hiaUpdate", ["string"]
         command "reboot"
+        command "rebootW_Rebuild"
+        command "rebootPurgeLogs"
         command "shutdown"
         command "updateCheck"
         command "removeUnused"
@@ -184,7 +200,7 @@ preferences {
         input("username", "string", title: "Hub Security Username", required: false, width:4)
         input("password", "password", title: "Hub Security Password", required: false, width:4)
     }
-    input("freeMemUnit", "enum", title: "Free Memory Unit", options:["KB","MB"], defaultValue:"KB", width:4)
+    input("freeMemUnit", "enum", title: "Free Memory Unit", options:["KB","MB","GB","Dynamic"], defaultValue:"KB", width:4)
     input("sunSdfPref", "enum", title: "Date/Time Format for Sunrise/Sunset", options:sdfList, defaultValue:"HH:mm:ss", width:4)
     input("updSdfPref", "enum", title: "Date/Time Format for Last Poll Time", options:sdfList, defaultValue:"Milliseconds", width:4)
     input("rsrtSdfPref", "enum", title: "Date/Time Format for Hub Restart Formatted", options:sdfList, defaultValue:"yyyy-MM-dd HH:mm:ss", width:4)
@@ -204,15 +220,16 @@ void installed() {
 }
 
 void initialize() {
-    log.info "Hub Information v${version()} initialized"
     restartCheck()
     updated()
-    runIn(8,"initMemory")
-    runIn(5,"baseData")
+    runIn(30,"initMemory")
     if (settings["parm12"] != 0)
         runIn(30,"updateCheck")
     if(!state?.v2Cleaned)
         v2Cleanup()
+    log.info "Hub Information v${version()} initialized"
+    runIn(120,"baseData")
+
 }
 
 void initMemory(){
@@ -228,6 +245,7 @@ void configure() {
 }
 
 void updated(){
+    baseData()
     if(debugEnable) log.debug "updated"
 	unschedule()
 	state.poll1 = []
@@ -506,7 +524,22 @@ void getFreeMemory(resp, data) {
     try {
         if(resp.getStatus() == 200 || resp.getStatus() == 207) {
             Integer memWork = new Integer(resp.data.toString())
-            if(debugEnable) log.debug memWork
+            if(debugEnable)
+                log.debug "Free Memory $memWork"
+            if(freeMemUnit == "Dynamic"){
+                if(memWork > 1048575){
+                    freeMemUnit = "GB"
+                    if(debugEnable) log.debug "unit is $freeMemUnit"
+                }else if(memWork > 150000){
+                    freeMemUnit = "MB"
+                    if(debugEnable) log.debug "unit is $freeMemUnit"
+                }
+                else freeMemUnit = "KB"
+            }
+
+            if(freeMemUnit == "GB")
+                updateAttr("freeMemory",(new Float(memWork/1024/1024).round(2)), "GB")
+            else
             if(freeMemUnit == "MB")
                 updateAttr("freeMemory",(new Float(memWork/1024).round(2)), "MB")
             else
@@ -763,6 +796,20 @@ void parseZwave(String zString){
         HashMap zMap = (HashMap)evaluate(wrkStr)
 
         updateAttr("zwaveSDKVersion","${((List)zMap.targetVersions)[0].version}.${((List)zMap.targetVersions)[0].subVersion}")
+        if(location.hub.firmwareVersionString < "2.3.8.124")
+            updateAttr("zwaveSDKVersion","${((List)zMap.targetVersions)[0].version}.${((List)zMap.targetVersions)[0].subVersion}")
+        else {
+            params = [
+                uri    : "http://127.0.0.1:8080",
+                path   : "/hub/advanced/zipgatewayVersion",
+                headers: ["Cookie": cookie]
+            ]
+            httpGet(params) { resp ->
+                updateAttr("zwaveSDKVersion",resp.data)
+            }
+        }
+
+
         updateAttr("zwaveVersion","${zMap?.firmware0Version}.${zMap?.firmware0SubVersion}.${zMap?.hardwareVersion}")
     }
 }
@@ -926,6 +973,11 @@ void getHub2Data(resp, data){
             }
             if(debugEnable) log.debug "securityInUse"
             updateAttr("securityInUse", h2Data.baseModel.userLoggedIn)
+            if(!h2Data.baseModel.cloudDisconnected){
+                updateAttr("pCloud", "connected")
+            } else {
+                updateAttr("pCloud", "not connected")
+            }
             if(debugEnable) log.debug "h2 security check"
             if((!security || password == null || username == null) && h2Data.baseModel.userLoggedin == true){
                 log.error "Hub using Security but credentials not supplied"
@@ -1004,7 +1056,10 @@ void getExtNetwork(resp, data){
             dnsList = dnsList.unique()
             checkDns(dnsList)
             updateAttr("dnsServers", dnsList)
-            updateAttr("lanSpeed", h2Data.lanAutonegStatus)
+            if(h2Data.lanAutoneg == 'AUTONEG')
+                updateAttr("lanSpeed","Auto","mbps")
+            else
+                updateAttr("lanSpeed", "100","mbps")
 
         }
     }catch (ex) {
@@ -1055,6 +1110,11 @@ void getUpdateCheck(resp, data) {
     try {
         if (resp.status == 200) {
             def jSlurp = new JsonSlurper()
+            /*/Temporary capture
+            tempStr = readFile("updateLog.txt")
+            tempStr+="\n${resp.data}"
+            writeFile("updateLog.txt",tempStr)
+            /*/
             Map resMap = (Map)jSlurp.parseText((String)resp.data)
             if(resMap.status == "NO_UPDATE_AVAILABLE")
                 updateAttr("hubUpdateStatus","Current")
@@ -1156,7 +1216,8 @@ void getExtendedZigbee(resp, data){
 }
 
 void checkMatter(cookie){
-    if(!currentVersinGTEQ("2.3.7.1") || getHubVersion() != "C-8")
+    hubModel = getHubVersion()
+    if(!(isCompatible(5)))
         return
 
     params = [
@@ -1186,6 +1247,7 @@ boolean isCompatible(Integer minLevel) { //check to see if the hub version meets
     String model = getHubVersion()
     String[] tokens = model.split('-')
     String revision = tokens.last()
+    if(revision.contains('Pro')) revision = 9
     return (Integer.parseInt(revision) >= minLevel)
 }
 
@@ -1261,6 +1323,23 @@ String readExtFile(fName){
 @SuppressWarnings('unused')
 Boolean fileExists(fName){
     if(fName == null) return false
+    try{
+        if(location.hub.firmwareVersionString >= "2.3.4.134"){
+            byte[] rData = downloadHubFile("$fName")
+            fContent = new String(rData, "UTF-8")
+            if(fContent.size() > 0) {
+                if(debugEnable) log.debug "File Exist: true"
+                return true;
+            } else {
+                if(debugEnable) log.debug "File Exist: false"
+                return false;
+            }
+        }
+    } catch (ex) {
+        log.error "$fName - $ex"
+        return false
+    }
+
     uri = "http://${location.hub.localIP}:8080/local/${fName}";
 
      def params = [
@@ -1273,7 +1352,7 @@ Boolean fileExists(fName){
                 if(debugEnable) log.debug "File Exist: true"
                 return true;
             } else {
-                if(debugEnable) log.debug "File Exist: true"
+                if(debugEnable) log.debug "File Exist: false"
                 return false
             }
         }
@@ -1357,8 +1436,13 @@ void createHtml(){
 
 @SuppressWarnings('unused')
 String readFile(fName){
-    if(currentVersionGTEQ("2.3.4.132")){
-        return new String(downloadHubFile(fName))
+    try{
+        if(location.hub.firmwareVersionString >= "2.3.4.134"){
+            byte[] rData = downloadHubFile("$fName")
+            return new String(rData, "UTF-8")
+        }
+    } catch (ex) {
+        log.error "$fName - $ex"
     }
 
     if(security) cookie = getCookie()
@@ -1399,6 +1483,12 @@ String readFile(fName){
 }
 @SuppressWarnings('unused')
 Boolean writeFile(String fName, String fData) {
+    if(location.hub.firmwareVersionString >= "2.3.4.134"){
+        wData = fData.getBytes("UTF-8")
+        uploadHubFile("$fName",wData)
+        return true
+    }
+
     now = new Date()
     String encodedString = "thebearmay$now".bytes.encodeBase64().toString();
 
@@ -1444,7 +1534,6 @@ void reboot() {
         return
     }
     log.info "Hub Reboot requested"
-    // start - Modified from dman2306 Rebooter app
     String cookie=(String)null
     if(security) cookie = getCookie()
 	httpPost(
@@ -1456,7 +1545,70 @@ void reboot() {
 			]
 		]
 	) {		resp ->	}
-    // end - Modified from dman2306 Rebooter app
+}
+
+@SuppressWarnings('unused')
+void rebootW_Rebuild() {
+    if(!allowReboot){
+        log.error "Reboot was requested, but allowReboot was set to false"
+        return
+    }
+    if(location.hub.firmwareVersionString < "2.3.7.122"){
+        log.error "Reboot with rebuild was requested, but failed HE min version."
+        return
+    }
+    log.info "Hub Reboot with Rebuild requested"
+    String cookie=(String)null
+    if(security) cookie = getCookie()
+    if(location.hub.firmwareVersionString < "2.3.7.14"){
+    	httpPost(
+	    	[
+		    	uri: "http://127.0.0.1:8080",
+			    path: "/hub/rebuildDatabaseAndReboot",
+      			headers:[
+	    			"Cookie": cookie
+		    	]
+    		]
+	    ) {		resp ->	}
+    } else {
+        httpPost(
+		[
+			uri: "http://127.0.0.1:8080",
+			path: "/hub/reboot",
+			headers:[
+				"Cookie": cookie,
+                "Content-Type": "application/x-www-form-urlencoded"
+			],
+            body:[rebuildDatabase:"true"]
+	    ]
+    	) {		resp ->	}
+    }
+}
+
+void rebootPurgeLogs() {
+    if(!allowReboot){
+        log.error "Reboot was requested, but allowReboot was set to false"
+        return
+    }
+    if(location.hub.firmwareVersionString < "2.3.7.140"){
+        log.error "Reboot with Purge was requested, but failed HE min version."
+        return
+    }
+    log.info "Hub Reboot & Log Purge requested"
+    String cookie=(String)null
+    if(security) cookie = getCookie()
+	httpPost(
+		[
+			uri: "http://127.0.0.1:8080",
+			path: "/hub/reboot",
+			headers:[
+				"Cookie": cookie,
+                "Content-Type": "application/x-www-form-urlencoded"
+			],
+            body:[purgeLogs:"true"]
+		]
+	) {		resp ->	}
+>>>>>>> upstream/main
 }
 
 @SuppressWarnings('unused')
@@ -1465,8 +1617,7 @@ void shutdown() {
         log.error "Shutdown was requested, but allowReboot/Shutdown was set to false"
         return
     }
-    log.info "Hub Reboot requested"
-    // start - Modified from dman2306 Rebooter app
+    log.info "Hub Shutdown requested"
     String cookie=(String)null
     if(security) cookie = getCookie()
 	httpPost(
@@ -1478,7 +1629,7 @@ void shutdown() {
 			]
 		]
 	) {		resp ->	}
-    // end - Modified from dman2306 Rebooter app
+
 }
 
 void formatUptime(){
@@ -1529,8 +1680,6 @@ void restartCheck() {
         updateAttr("lastHubRestartFormatted", sdf.format(upDate.getTime()))
     }
 
-//    SimpleDateFormat sdf= new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-//    updateAttr("lastHubRestartFormatted",sdf.format(upDate))
 }
 
 void removeUnused() {
@@ -1621,11 +1770,11 @@ void logsOff(){
 [parm10:[desc:"Hub Mesh Data", attributeList:"hubMeshData, hubMeshCount", method:"hubMeshReq"]],
 [parm11:[desc:"Expanded Network Data", attributeList:"connectType (Ethernet, WiFi, Dual, Not Connected), connectCapable (Ethernet, WiFi, Dual), dnsServers, staticIPJson, lanIPAddr, wirelessIP, wifiNetwork, dnsStatus, lanSpeed", method:"extNetworkReq"]],
 [parm12:[desc:"Check for Firmware Update",attributeList:"hubUpdateStatus, hubUpdateVersion",method:"updateCheckReq"]],
-[parm13:[desc:"Zwave Status & Hub Alerts",attributeList:"hubAlerts,zwaveStatus, zigbeeStatus2, securityInUse", method:"hub2DataReq"]],
+[parm13:[desc:"Z Status, Hub Alerts, Passive Cloud Check",attributeList:"hubAlerts,zwaveStatus, zigbeeStatus2, pCloud, securityInUse", method:"hub2DataReq"]],
 [parm14:[desc:"Base Data",attributeList:"firmwareVersionString, hardwareID, id, latitude, localIP, localSrvPortTCP, locationId, locationName, longitude, name, temperatureScale, timeZone, type, uptime, zigbeeChannel, zigbeeEui, zigbeeId, zigbeeStatus, zipCode",method:"baseData"]],
 [parm15:[desc:"15 Minute Averages",attributeList:"cpu15Min, cpu15Pct, freeMem15", method:"fifteenMinute"]],
-[parm16:[desc:"Check Cloud Connection",attributeList:"cloud", method:"checkCloud"]],
-[parm17:[desc:"Matter Status (C8 only)",attributeList:"matterEnabled, matterStatus", method:"checkMatter"]]
+[parm16:[desc:"Active Cloud Connection Check",attributeList:"cloud", method:"checkCloud"]],
+[parm17:[desc:"Matter Status (C-5 and > only)",attributeList:"matterEnabled, matterStatus", method:"checkMatter"]]
 ]
 @Field static String ttStyleStr = "<style>.tTip {display:inline-block;border-bottom: 1px dotted black;}.tTip .tTipText {display:none;border-radius: 6px;padding: 5px 0;position: absolute;z-index: 1;}.tTip:hover .tTipText {display:inline-block;background-color:yellow;color:black;}</style>"
 @Field sdfList = ["yyyy-MM-dd","yyyy-MM-dd HH:mm","yyyy-MM-dd h:mma","yyyy-MM-dd HH:mm:ss","ddMMMyyyy HH:mm","ddMMMyyyy HH:mm:ss","ddMMMyyyy hh:mma", "dd/MM/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm:ss", "dd/MM/yyyy hh:mma", "MM/dd/yyyy hh:mma", "MM/dd HH:mm", "HH:mm", "H:mm","h:mma", "HH:mm:ss", "Milliseconds"]

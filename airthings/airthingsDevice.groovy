@@ -24,7 +24,7 @@
  *    22Dec2022    thebearmay    hub security 
  *    15Jan2023    thebearmay    add descriptionText
  *                               trap relayDeviceType
- *    01Feb2023                  Add a delay before building the html
+ *    04Dec2023    thebearmay    PM25 -> AQI 
 */
 import java.text.SimpleDateFormat
 import groovy.json.JsonSlurper
@@ -32,7 +32,7 @@ import groovy.json.JsonSlurper
 #include thebearmay.templateProcessing
 
 @SuppressWarnings('unused')
-static String version() {return "0.0.18"}
+static String version() {return "0.0.18a"}
 
 metadata {
     definition (
@@ -77,12 +77,15 @@ metadata {
         attribute "pm27", "number"
         attribute "pm28", "number"
         attribute "pm29", "number"
+        attribute "pm25Aqi","number"
+        attribute "pm25AqiText","string"
 //        attribute "valuesAsOf", "string"
         attribute "absHumidity", "number"
         attribute "mold", "number"
         attribute "html", "string"
         
         command "refresh"  
+//        command "test",[[name:"val*", type:"NUMBER", description:"pm25 Value"]]
     }   
 }
 
@@ -147,7 +150,9 @@ void refresh() {
 }
 
 void dataRefresh(retData){
+    if(debugEnabled) log.debug "$retData.data ${retData.data.size()}"
     retData.data.each{
+        if(debugEnabled) log.debug "Each:${it.key}"
         unit=""
         switch (it.key){
             case("temp"):
@@ -200,24 +205,27 @@ void dataRefresh(retData){
             default:
                 unit=""
                 try{
-                    it.value = it.value.toFloat().toInteger()
+                    it.value = Math.floor(10 * it.value.toFloat()) / 10
                 } catch(e) { 
                     log.warn "Return Data Mismatch, Key: ${it.key} Value: ${it.value} - value will be set to zero"
                     it.value = 0
                 }
                 break
         }
-        if((it.key != "temp" && unit != null) || it.key.startsWith('pm') || it.key == "mold") //unit will be null for any values not tracked
+        if(debugEnabled) log.debug "${it.key}:${it.value}" 
+        if((it.key != "temp" && unit != null) || it.key.startsWith('pm') || it.key == "mold") {//unit will be null for any values not tracked
             updateAttr(it.key, it.value, unit) 
+            if(debugEnabled) log.debug "${it.key}"
+            if("${it.key}" == "pm25") 
+                calcPm25Aqi(it.value)
+        }
     }
     calcAbsHumidity()
     if(tileTemplate && tileTemplate != "No selection" && tileTemplate != "--No Selection--"){
-        runIn(5, "buildHtml")          
+        tileHtml = genHtml(tileTemplate)
+        updateAttr("html","$tileHtml")
     }
-}
-void buildHtml(){
-    tileHtml = genHtml(tileTemplate)
-    updateAttr("html","$tileHtml") 
+ 
 }
 
 void calcAbsHumidity() {
@@ -237,6 +245,55 @@ void calcAbsHumidity() {
     updateAttr("absHumidity", absHumidityR, "g/m<sup>3</sup>")
 }
 
+void test(val){
+    log.debug "test($val)"
+    x=[:]
+    x.data = [pm25:val]
+    dataRefresh(x)
+}
+
+void calcPm25Aqi(pm25Val){
+    if(debugEnabled) 
+        log.debug "calcPm25Aqi($pm25Val)"
+    aqiLevel = [[max: 50,  color: "green", name: "Good"],
+                [max: 100, color: "yellow", name: "Moderate"],
+                [max: 150, color: "orange", name: "Unhealthy for sensitive groups"],
+                [max: 200, color: "red", name: "Unhealthy"],
+                [max: 300, color: "purple", name: "Very unhealthy"],
+                [max: 500, color: "maroon", name: "Hazardous"]]
+    a = pm25Val.toFloat();
+    c = a < 0 ? 0 // values below 0 are considered beyond AQI
+        : a < 12.1 ? lerp(  0.0,  12.0,   0,  50, a)
+        : a < 35.5 ? lerp( 12.1,  35.4,  51, 100, a)
+        : a < 55.5 ? lerp( 35.5,  55.4, 101, 150, a)
+        : a < 150.5 ? lerp( 55.5, 150.4, 151, 200, a)
+        : a < 250.5 ? lerp(150.5, 250.4, 201, 300, a)
+        : a < 350.5 ? lerp(250.5, 350.4, 301, 400, a)
+        : a < 500.5 ? lerp(350.5, 500.4, 401, 500, a)
+        : 500// values above 500 are considered beyond AQI
+    if(debugEnabled) log.debug "lerp returned $c"
+    aLevel = Math.floor(10 * c) / 10
+    updateAttr("pm25Aqi",aLevel)
+    for (i=0;i<aqiLevel.size();i++){
+        if(debugEnabled) log.debug "$aLevel:${aqiLevel[i].max}"
+        if(aLevel <= aqiLevel[i].max){
+            pm25AqiText = "<span style='color:${aqiLevel[i].color}'>${aqiLevel[i].name}</span>"
+            updateAttr("pm25AqiText",pm25AqiText)
+            break
+        }
+    }
+  
+    
+}
+
+float lerp(plo, phi, ilo, ihi, p) {
+    if(debugEnabled) 
+        log.debug "lerp $plo $phi $ilo $ihi $p"
+    float calcAqi = (((ihi-ilo)/(phi-plo))*(p-plo))+ilo
+    if(calcAqi > ihi.toFloat()) calcAqi = ihi
+    return calcAqi
+}
+
 @SuppressWarnings('unused')
 List<String> listFiles(){
     if(security) cookie = securityLogin().cookie
@@ -252,7 +309,7 @@ List<String> listFiles(){
         fileList = []
         httpGet(params) { resp ->
             if (resp != null){
-                if(logEnable) log.debug "Found the files"
+                if(debugEnabled) log.debug "Found the files"
                 def json = resp.data
                 for (rec in json.files) {
                     fileList << rec.name

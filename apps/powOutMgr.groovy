@@ -20,10 +20,14 @@
  *    21Feb2023                  v0.2.0 - Add device on/off capabilities
  *                                        Add RM interface 
  *    05Mar2023                  v0.2.1 - Fix typo
+ *    20Mar2024                  v0.2.2 - unschedule pending actions if power is restored
+ *                                        update Apps List logic to reflect new UI
+ *    20Mar2024                  v0.2.3 - Add PowerMeter with healthStatus offline/online
+ * 				 v0.2.4 - handle null queue selections
 */
 
 import hubitat.helper.RMUtils
-static String version()	{  return '0.2.1' }
+static String version()	{  return '0.2.4' }
 
 definition (
 	name: 			"Power Outage Manager", 
@@ -70,7 +74,7 @@ def mainPage(){
       	if (app.getInstallationState() == 'COMPLETE') {   
             section("<h3>Main</h3>"){
                 
-                input "triggerDevs", "capability.powerSource,capability.presenceSensor", title:"Devices with PowerSource/Presence to act as Triggers", submitOnChange:true, multiple:true
+                input "triggerDevs", "capability.powerSource,capability.presenceSensor,capability.powerMeter", title:"Devices with PowerSource/Presence to act as Triggers", submitOnChange:true, multiple:true
                 if(triggerDevs != null) {
                     unsubscribe()
                     state.onMains=[:]
@@ -80,6 +84,8 @@ def mainPage(){
                             subscribe(it, "powerSource", "triggerOccurrence")
                        else if(it.hasCapability("PresenceSensor"))
                             subscribe(it, "presence", "triggerOccurrence")
+                       else if(it.hasCapability("PowerMeter"))
+                            subscribe(it, "healthStatus", "triggerOccurrence")
                     }
                     subscribe(location, "systemStart", "systemStartCheck")
                     pollDevices()
@@ -209,7 +215,7 @@ void triggerOccurrence(evt){
     if(state.onMains == null) state.onMains = [:]  
     if(state.onBattery == null) state.onBattery = [:]
     
-    if(evt.value.toString().trim() == "battery" || evt.value.toString().trim() == "not present") {
+    if(evt.value.toString().trim() == "battery" || evt.value.toString().trim() == "not present" || evt.value.toString().trim() == "offline") {
         state.onBattery["dev${evt.deviceId}"] = true
         mainsTemp = [:]
         state.onMains.each{
@@ -219,7 +225,7 @@ void triggerOccurrence(evt){
         state.onMains = mainsTemp       
         if(debugEnabled) log.debug "${state.onMains} <br> ${state.onBattery}"
         if(state.onBattery.size() >= agreement) startOutActions()
-    } else if(evt.value.toString().trim() == "mains" || evt.value.toString().trim() == "present") {
+    } else if(evt.value.toString().trim() == "mains" || evt.value.toString().trim() == "present"|| evt.value.toString().trim() == "online") {
         state.onMains["dev${evt.deviceId}"] = true
         batteryTemp = [:]
         state.onBattery.each{
@@ -257,7 +263,7 @@ void pollDevices(){
     if(state.onBattery == null) state.onBattery = [:]
     triggerDevs.each { dev ->
         if(debugEnabled) log.debug dev.currentValue("powerSource")
-        if(dev.currentValue("powerSource") == "mains" || dev.currentValue("presence") == "present"){
+        if(dev.currentValue("powerSource") == "mains" || dev.currentValue("presence") == "present"|| dev.currentValue.toString().trim() == "online"){
                 state.onMains["dev${dev.id}"] = true
                 batteryTemp = [:]
                 state.onBattery.each{
@@ -265,7 +271,7 @@ void pollDevices(){
                         batteryTemp[it.key] = state.onBattery[it.key]
                 }
                 state.onBattery = batteryTemp
-        } else if(dev.currentValue("powerSource") == "battery" || dev.currentValue("presence") == "not present"){
+        } else if(dev.currentValue("powerSource") == "battery" || dev.currentValue("presence") == "not present" || dev.currentValue.toString().trim() == "offline"){
                 state.onBattery["dev${dev.id}"] = true
                 mainsTemp = [:]           
                 state.onMains.each{
@@ -298,13 +304,22 @@ void startOutage(){
     delayList[1] = oaDelay1.toInteger()*60
     delayList[2] = oaDelay2.toInteger()*60
     delayList[3] = oaDelay3.toInteger()*60
-    if(zbDisable > 0) runIn(delayList[zbDisable.toInteger()], "disableZb")
-    if(zwDisable > 0) runIn(delayList[zwDisable.toInteger()], "disableZw")
-    if(appDisable > 0) runIn(delayList[appDisable.toInteger()], "disableApps")
-    if(turnOffDevs > 0) runIn(delayList[turnOffDevs.toInteger()], "devsOff")
-    if(rebootHubO > 0) runIn(delayList[rebootHub.toInteger()], "reboot")
-    if(shutdownHub > 0) runIn(delayList[shutdownHub.toInteger()], "shutdown")
-    if(rmRuleO) runIn(delayList[rmRuleO.toInteger()], "outageRunRM")
+    if(zbDisable == null) zbDisable = 0
+    if(zwDisable == null) zwDisable = 0
+    if(appDisable == null) appDisable = 0
+    if(turnOffDevs == null) turnOffDevs = 0
+    if(rebootHubO == null) rebootHubO = 0 
+    if(shutdownHub == null) shutdownHub = 0    
+    if(rmRuleO == null) rmRuleO = 0
+    
+    
+    if(zbDisable.toInteger() > 0) runIn(delayList[zbDisable.toInteger()], "disableZb")
+    if(zwDisable.toInteger() > 0) runIn(delayList[zwDisable.toInteger()], "disableZw")
+    if(appDisable.toInteger() > 0) runIn(delayList[appDisable.toInteger()], "disableApps")
+    if(turnOffDevs.toInteger() > 0) runIn(delayList[turnOffDevs.toInteger()], "devsOff")
+    if(rebootHubO.toInteger() > 0) runIn(delayList[rebootHub.toInteger()], "reboot")
+    if(shutdownHub.toInteger() > 0) runIn(delayList[shutdownHub.toInteger()], "shutdown")
+    if(rmRuleO.toInteger()) runIn(delayList[rmRuleO.toInteger()], "outageRunRM")
 }
 
 void disableZb(){
@@ -334,15 +349,19 @@ void outageRunRM(){
 
 void startUpActions(){
     if(state.outage == false) return //already started processing
+    unschedule() //stop any pending shutdown activity
     state.outage = false
     runIn(triggerDelay.toInteger()*60, "startRecover")
 }
 
 void startRecover(){
     if(state.outage) return //check if conditions have changed to outage
+    
+
     notifyDev.each { 
       it.deviceNotification(notifyMsgUp)  
     } 
+    
     if(zbEnabled) zbPost("enabled")
     if(zwEnabled) zwPost("enabled")
     if(appEnabled) appsPost("enable")
@@ -510,30 +529,29 @@ void restoreRunRM(){
 }
 
 HashMap [] getAppsList() { 
-
 	def params = [
-		uri: "http://127.0.0.1:8080/installedapp/list",
-		textParser: true
+		uri: "http://127.0.0.1:8080/hub2/appsList",
+        headers: [
+            accept:"application/json"
+        ],
+		textParser: false
 	  ]
 	
 	def allAppsList = []
     def allAppNames = []
 	try {
-		httpGet(params) { resp ->    
-			def matcherText = resp.data.text.replace("\n","").replace("\r","")
-			def matcher = matcherText.findAll(/(<tr class="app-row" data-app-id="[^<>]+">.*?<\/tr>)/).each {
-				def allFields = it.findAll(/(<td .*?<\/td>)/) // { match,f -> return f } 
-				def id = it.find(/data-app-id="([^"]+)"/) { match,i -> return i.trim() }
-				def title = allFields[0].find(/data-order="([^"]+)/) { match,t -> return t.trim() }
-				allAppsList += [id:id,title:title]
-                allAppNames << title
-			}
+		httpGet(params) { resp ->   
+            resp.data.apps.data.each {
+				allAppsList.add([id:it.id,title:it.name])
+                allAppNames.add( it.name )               
+            }
 
 		}
 	} catch (e) {
 		log.error "Error retrieving installed apps: ${e}"
         log.error(getExceptionMessageWithLine(e))
 	}
+    
     return allAppsList
 }
 

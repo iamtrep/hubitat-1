@@ -26,6 +26,10 @@
  *    05Nov2022    thebearmay	 exist attribute instantiate
  *    08Dec2022    thebearmay    Fix typo in fileDelete method
  *    17Feb2023    thebearmay    add lastFileWritten and lastFileWrittenTimeStamp
+ *    29Dec2023    thebearmay    Append File to create if doesn't exist
+ *    03Jan2024    thebearmay    convert \n in strings to the newline character for write file and append file commands
+ *    08Jan2024	   thebearmay	 missed a debug line
+ *    08Feb2024    thebearmay    try block around image read
 */
 
 import java.net.URLEncoder
@@ -37,7 +41,7 @@ import java.text.SimpleDateFormat
 @Field sdfList = ["yyyy-MM-dd","yyyy-MM-dd HH:mm","yyyy-MM-dd h:mma","yyyy-MM-dd HH:mm:ss","ddMMMyyyy HH:mm","ddMMMyyyy HH:mm:ss","ddMMMyyyy hh:mma", "dd/MM/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm:ss", "dd/MM/yyyy hh:mma", "MM/dd/yyyy hh:mma", "MM/dd HH:mm", "HH:mm", "H:mm","h:mma", "HH:mm:ss", "Milliseconds"]
 
 @SuppressWarnings('unused')
-static String version() {return "0.2.7"}
+static String version() {return "0.2.11"}
 
 metadata {
     definition (
@@ -261,7 +265,7 @@ String readFile(fName){
         }
     } catch (exception) {
         log.error "Read Error: ${exception.message}"
-        return null;
+        return null
     }
 }
 
@@ -274,9 +278,9 @@ def appendFile(fName,newData,Closure closure) {
 Boolean appendFile(fName,newData){
     try {
         fileData = (String) readFile(fName)
-        if(fileData.length()>0) 
+        if(fileData?.length()>0) 
             fileData = fileData.substring(0,fileData.length()-1)
-        else fileData = " "
+        else fileData = ""
         return writeFile(fName,fileData+newData)
     } catch (exception){
         if (exception.message == "Not Found"){
@@ -324,6 +328,8 @@ def writeFile(String fName, String fData, Closure closure) {
 
 @SuppressWarnings('unused')
 Boolean writeFile(String fName, String fData) {
+    fData = fData.replace("\\n","\n")
+    if(debugEnabled) log.debug fData
     byte[] fDataB = fData.getBytes("UTF-8")
     return writeImageFile(fName, fDataB, "text/html")   
 }
@@ -426,7 +432,8 @@ List<String> listFiles(){
 @SuppressWarnings('unused')
 def uploadImage(imagePath, oName){
     imageData = readImage(imagePath)
-    writeImageFile(oName, imageData.iContent, imageData.iType)
+    if(imageData.iType != 'Error')
+        writeImageFile(oName, imageData.iContent, imageData.iType)
 }
 
 @SuppressWarnings('unused')
@@ -454,24 +461,29 @@ HashMap readImage(imagePath){
     if(security) cookie = securityLogin().cookie   
 
     if(debugEnabled) log.debug "Getting Image $imagePath"
-    httpGet([
-        uri: "$imagePath",
-        contentType: "*/*",
-        headers: [
-            "Cookie": cookie
-        ],
-        textParser: false]){ response ->
-            if(debugEnabled) log.debug "${response.properties}"
-            imageData = response.data 
-            if(debugEnabled) log.debug "Image Size (${imageData.available()} ${response.headers['Content-Length']})"
+    try{
+        httpGet([
+            uri: "$imagePath",
+            contentType: "*/*",
+            headers: [
+                "Cookie": cookie
+            ],
+            textParser: false]){ response ->
+                if(debugEnabled) log.debug "${response.properties}"
+                imageData = response.data 
+                if(debugEnabled) log.debug "Image Size (${imageData.available()} ${response.headers['Content-Length']})"
 
-            def bSize = imageData.available()
-            def imageType = response.contentType 
-            byte[] imageArr = new byte[bSize]
-            imageData.read(imageArr, 0, bSize)
-            if(debugEnabled) log.debug "Image size: ${imageArr.length} Type:$imageType"  
-            return [iContent: imageArr, iType: imageType]
-        }    
+                def bSize = imageData.available()
+                def imageType = response.contentType 
+                byte[] imageArr = new byte[bSize]
+                imageData.read(imageArr, 0, bSize)
+                if(debugEnabled) log.debug "Image size: ${imageArr.length} Type:$imageType"  
+                return [iContent: imageArr, iType: imageType]
+            }
+    }catch (ex){
+        log.error ex.message
+        return [iContent:null, iType:'Error']
+    }
 }
 
 @SuppressWarnings('unused')
@@ -511,7 +523,7 @@ Boolean writeImageFile(String fName, byte[] fData, String imageType) {
 		]
 		httpPost(params) { resp ->
             if(debugEnabled) log.debug "writeImageFile ${resp.properties}"
-            log.info "${resp.data.success} ${resp.data.status}"
+            if(logResponses) log.info "${resp.data.success} ${resp.data.status}"
             updateAttr("lastFileWritten", "$fName")
             if(sdfFormat == null) device.updateSetting("sdfFormat",[value:"Milliseconds",type:"string"])
             if(sdfFormat == "Milliseconds" || sdfFormat == null) 
