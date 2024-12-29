@@ -17,16 +17,20 @@
  *    25Jun2024                  add Restart button, Max/Min/Avg options
  *    26Jun2024                  Fix bug in computed reporting
  *    27Jun2024                  Changes to interface with the UI app, Value interval, purge unused preferences
+ *    01Jul2024                  v0.0.6 Make the header optional, optional device column, SDF options for timestamp, fix restart issue
+ *    02Jul2024                  v0.0.7 Disable/Enable reporting option, add notification device
+ *                               v0.0.8 Fix numIter = 1 
+ *    03Jul2024                  v0.0.9 Value Change ignoring disable
  */
     
 
 
-static String version()	{  return '0.0.5'  }
+static String version()	{  return '0.0.9'  }
 
 //import groovy.json.JsonSlurper
 //import groovy.json.JsonOutput
-//import groovy.transform.Field
-
+import groovy.transform.Field
+import java.text.SimpleDateFormat
 
 definition (
 	name: 			"Device Attribute Iterative Storage - Acquisition", 
@@ -46,6 +50,7 @@ preferences {
     page name: "mainPage"
     page name: "attrSelect"
     page name: "compAttr"
+    page name: "optPage"
 
 }
 mappings {
@@ -75,36 +80,25 @@ def mainPage(){
     dynamicPage (name: "mainPage", title: "", install: true, uninstall: false) {
       	if (app.getInstallationState() == 'COMPLETE') {   
           section(name:"itDetail",title:"Iteration Retention Details", hideable: true, hidden: false){
+              
              input "qryDevice", "capability.*", title: "Device Selection:", multiple: false, required: true, submitOnChange: true
              if (qryDevice != null) {
-                 href "attrSelect", title: "Attribute Selection", required: false
-                 href "compAttr", title: "Computed Values (Max/Min/Avg)", required: false
-                 input ("numIter","number",title:"Number of Iterations to Retain", submitOnChange: true, width:4)
-                 input ("intType", "enum", title:"Reporting Interval Type", options: ["Minutes", "Hours", "Days","Value Change"], submitOnChange: true, width:4)
-                 input ("intVal", "number", title: "Reporting Interval Length", submitOnChange: true, width:4)
+                href "attrSelect", title: "Attribute Selection", required: false
+                href "compAttr", title: "Computed Values (Max/Min/Avg)", required: false
+                href "optPage", title: "Advanced Options", required:false
+                input ("numIter","number",title:"Number of Iterations to Retain", submitOnChange: true, width:4)
+                input ("intType", "enum", title:"Reporting Interval Type", options: ["Minutes", "Hours", "Days","Value Change"], submitOnChange: true, width:4)
+                input ("intVal", "number", title: "Reporting Interval Length", submitOnChange: true, width:4)
                  
-                 input ("stoLocation","string",title: "Local file name to use for Storage (will add .CSV)", submitOnChange:true, width:4)
-                 
-                 if(stoLocation != null) {
+                input ("stoLocation","text",title: "Local file name to use for Storage (will add .CSV when file is created)", submitOnChange:true, width:4, defaultValue:"${nameOverride}")
+                
+                if(stoLocation != null) {
                      input ("createFile", "button", title: "Create File", width:4)
                      if(state.fileCreateReq) {
                          purgeOldStates()
                          checkSubscriptions()
                          state.fileCreateReq = false
-                         fName = toCamelCase(stoLocation)+".csv"
-                         app.updateSetting("stoLocation",[value:"${fName}",type:"string"])
-                         initString = "\"timeStamp\""
-                         valString ="\"${new Date().getTime()}\""
-                         state.sort().each {
-                             if(it.key != "isInstalled" && it.key != "fileCreateReq" && it.key != "rptRestart" && !it.key.contains('count')){
-                                 initString+=","
-                                 valString+=","
-                                 initString+= "\"${it.key}\""
-                                 valString+="\"${it.value}\""
-                             }
-                         }
-                         bArray = (initString+"\n"+valString+"\n").getBytes("UTF-8")                       
-                         uploadHubFile("${fName}",bArray)
+                         fileInitialize()
                          scheduleReport()                         
                      }
                      input ("restart", "button", title: "Restart Reporting", width:4)
@@ -113,16 +107,18 @@ def mainPage(){
                          scheduleReport()
                      }
                  }
+                 input "returnReq", "button", title:"Return to List",backgroundColor:"#007009",textColor:"white"
+                 if(state.returnReq){
+                     state.returnReq = false
+                     paragraph "<script>location.href = 'http://${location.hub.localIP}/installedapp/configure/${parent.id}/mainPage'</script>"
+                 }
              }
              
           }
           section("Change Application Name", hideable: true, hidden: true){
             input "nameOverride", "text", title: "New Name for Application", multiple: false, required: false, submitOnChange: true, defaultValue: app.getLabel()
-            if(nameOverride != app.getLabel) app.updateLabel(nameOverride)
+            if(nameOverride != app.getLabel()) app.updateLabel(nameOverride)
           }
-            section("Debug", hideable:false){
-                input "debugEnabled", "bool", title:"Enable Debug Logging"
-            }
 	    } else {
 		    section("") {
 			    paragraph title: "Click Done", "Please click Done to install app before continuing"
@@ -174,6 +170,18 @@ def compAttr(){
     }
 }
 
+def optPage(){
+    dynamicPage (name: "optPage", title: "Advanced Options", install: false, uninstall: false) {
+        section("",  hideable: false, hidden: false){
+            input("sdfPref", "enum", title: "Date/Time Format Timestamp Column", options:sdfList, defaultValue:"Milliseconds", width:4)
+			input("devCol", "bool", title:"Add Column for Device Name", width:4)
+            input("noHeader","bool", title:"Suppress Header Creation", width:4)
+            input("notifyDevice", "capability.notification", title: "Notification Devices:", multiple:true)
+            input("debugEnabled", "bool", title:"Enable Debug Logging",width:4)
+        }
+    }
+}
+
 void checkSubscriptions(){
     unsubscribe()
     settings.each{
@@ -211,10 +219,13 @@ void holdValue(evt) {
         state["avg-${evt.name}-count"]++        
     }
     if(debugEnabled) log.debug "finished holdValue"
-    if(intType == "Value Change") reportAttr()
+    if(intType == "Value Change" && !appDisable) reportAttr()
 }
 
-void scheduleReport(){
+
+void scheduleReport(evt=null){
+    if(appDisable)
+        return
     switch(intType) {
         case "Minutes":
             mult = 60
@@ -227,17 +238,68 @@ void scheduleReport(){
             break
     }
     if(intType != "Value Change")
-        runIn(mult*intVal, reportAttr)
+        runIn(mult*intVal, "reportAttr")
 }
 
 def getPref(keyVal){
     return settings["$keyVal"]
 }
 
+void setPref(key, val, pType) {
+    app.updateSetting("$key",[value:"$val",type:"$pType"])
+}
+
+void fileInitialize(){
+	if(devCol){
+		valString = "\"$qryDevice\","
+		initString = "\"device\","
+	}else{
+		valString = ""
+		initString = ""
+	}	
+	if(!sdfPref) sdfPref = "Milliseconds"
+	if(sdfPref == "Milliseconds")
+		valString +="\"${new Date().getTime()}\""
+	else {
+		tDate = new Date().getTime()
+		SimpleDateFormat sdf = new SimpleDateFormat(sdfPref)
+        valString +="\"${sdf.format(tDate)}\""
+	}
+	fName = toCamelCase(stoLocation)+".csv"
+	app.updateSetting("stoLocation",[value:"${fName}",type:"string"])
+	initString += "\"timeStamp\""
+	state.sort().each {
+        if(!ignoreState.toString().contains("${it.key}") && !it.key.contains('count')){
+			initString+=","
+			valString+=","
+			initString+= "\"${it.key}\""
+			valString+="\"${it.value}\""
+		}
+	}
+	if(noHeader)
+		bArray = (valString+"\n").getBytes("UTF-8")
+	else
+		bArray = (initString+"\n"+valString+"\n").getBytes("UTF-8")
+	
+	uploadHubFile("${fName}",bArray)
+}
+
 void reportAttr(){
-    valString ="\"${new Date().getTime()}\""
-    state.sort()each {
-        if(it.key != "isInstalled" && it.key != "fileCreateReq" && it.key != "rptRestart"){
+	if(devCol)
+		valString = "\"$qryDevice\","
+	else
+		valString = ""
+		
+	if(!sdfPref) sdfPref = "Milliseconds"
+	if(sdfPref == "Milliseconds")
+		valString +="\"${new Date().getTime()}\""
+	else {
+		tDate = new Date().getTime()
+		SimpleDateFormat sdf = new SimpleDateFormat(sdfPref)
+        valString +="\"${sdf.format(tDate)}\""
+	}
+    state.sort().each {
+        if(!ignoreState.toString().contains("${it.key}")){
             if(!it.key.contains('avg') && !it.key.contains('count')) {
                 valString+=","
                 valString+="\"${it.value}\""
@@ -259,19 +321,36 @@ void reportAttr(){
         }
     }
     fileContents = ""
-    if(fileRecords.size() <= numIter - 1)
-        inx = 0
-    else
-        inx = fileRecords.size() - numIter 
-    i=0
-    fileRecords.each {
-        if(debugEnabled) log.debug "$i $inx"
-        if(i > inx)
-            fileContents+="${it}\n"
-        i++
+    if(numIter > 1){
+        if(noHeader){
+	        if(fileRecords.size() <= numIter)
+	           inx = -1
+    	    else
+	           inx = fileRecords.size() - numIter
+        } else if(fileRecords.size() <= numIter - 1) {
+            inx = 0
+        } else
+            inx = fileRecords.size() - numIter 
+	
+        i=0
+        fileRecords.each {
+            if(debugEnabled) log.debug "$i $inx"
+            if(i > inx)
+                fileContents+="${it}\n"
+            i++
+        }    
     }
-    bArray = (fileRecords[0]+"\n"+fileContents+valString+"\n").getBytes("UTF-8")                       
+    
+	if(noHeader)
+		bArray = (fileContents+valString+"\n").getBytes("UTF-8") 
+	else
+		bArray = (fileRecords[0]+"\n"+fileContents+valString+"\n").getBytes("UTF-8")                       
     uploadHubFile("${stoLocation}",bArray)
+    if(notifyDevice){
+        notifyDevice.each{
+            it.deviceNotification(valString)
+        }
+    }
     scheduleReport()
 }
 
@@ -279,7 +358,7 @@ void purgeOldStates(){
     oldState = state
     state = [:]
     oldState.each{
-        if(it.key == "isInstalled" || it.key == "fileCreateReq" || it.key == "rptRestart" || settings["da-${it.key}"] || settings["ca-${it.key}"] ){
+        if(ignoreState.toString().contains("${it.key}") || settings["da-${it.key}"] || settings["ca-${it.key}"] ){
             state.put(it.key, it.value)
         }
     }
@@ -315,8 +394,13 @@ def appButtonHandler(btn) {
         case "restart":
             state.rptRestart = true
             break
+        case "returnReq":
+            state.returnReq = 'true'
+            break
         default: 
             log.error "Undefined button $btn pushed"
             break
     }
 }
+@Field sdfList = ["yyyy-MM-dd","yyyy-MM-dd HH:mm","yyyy-MM-dd h:mma","yyyy-MM-dd HH:mm:ss","ddMMMyyyy HH:mm","ddMMMyyyy HH:mm:ss","ddMMMyyyy hh:mma", "dd/MM/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm:ss", "dd/MM/yyyy hh:mma", "MM/dd/yyyy hh:mma", "MM/dd HH:mm", "HH:mm", "H:mm","h:mma", "HH:mm:ss", "Milliseconds"]
+@Field ignoreState = ["isInstalled","fileCreateReq","rptRestart","returnReq","appDisable"]

@@ -16,6 +16,8 @@
  *
  *    Date         Who           What
  *    ----         ---           ----
+ *    21Apr2023    thebearmay    add logic to map thermostatOperatingMode if equipmentStatus is received
+ *    16Sep2024                  handle child device already exists
 */
 import java.text.SimpleDateFormat
 import groovy.json.JsonSlurper
@@ -23,7 +25,7 @@ import groovy.json.JsonOutput
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "0.0.2"}
+static String version() {return "0.0.5"}
 
 metadata {
     definition (
@@ -104,7 +106,7 @@ String getAuth() {
     if(debugEnabled) log.debug "$requestParams"
     
     httpPost(requestParams) { resp ->
-        if(debugEnabled) log.debug "$resp.properties"
+        if(debugEnabled) log.debug "$resp.data"//"$resp.properties"
         jsonData = (HashMap) resp.data
         authKey = jsonData.accessToken
     }
@@ -112,13 +114,15 @@ String getAuth() {
 
 }
     
-HashMap getDeviceList(){
-    HashMap devMap = sendGet("/devices")
+ArrayList <HashMap> getDeviceList(){
+    ArrayList <HashMap> devMap = sendGet("/devices")
     return devMap
 }
 
 HashMap getDevDetail(id) {
     HashMap devDetail = sendGet("/deviceData/$id")
+    if(debugEnabled) 
+        log.debug "getDevDetail: $devDetail"
     return devDetail
 }
 
@@ -127,9 +131,9 @@ void getLocations() {
     updateAttr("locationMap","$locData")
 }
 
-HashMap sendGet(command){
+def sendGet(command){
     authToken = getAuth()
-    if(debugEnabled) log.debug "sendGet token:$authToken API: $apiKey"
+    if(debugEnabled) log.debug "sendGet token:$authToken"
     Map requestParams =
 	[
         uri:  "$serverPath$command",
@@ -142,7 +146,7 @@ HashMap sendGet(command){
     if(debugEnabled) log.debug "get parameters $requestParams"
     httpGet(requestParams) { resp ->
         if(debugEnabled) log.debug "$resp.properties"
-        jsonData = (HashMap) resp.data
+        jsonData = resp.data//(HashMap) resp.data
     }
     if(debugEnabled) log.debug "get JSON $jsonData"
     return jsonData
@@ -151,17 +155,18 @@ HashMap sendGet(command){
 
 void createChildDevices(){
     if(debugEnabled) log.debug "Create Child Devices"
-    HashMap devMap = getDeviceList()
+    ArrayList <HashMap> devMap = getDeviceList()
     if(debugEnabled) log.debug "Dev List $devMap"
     //[{"id":"<UUID of the device>","locationId":"<UUID of location>","name":"<name of device>","model":"ONEPLUS","firmwareVersion":"1.4.5","createdDate":1563568617,"hasOwner":true,"hasWrite":true}]
-//    devMap.each {
-        it = devMap
+    devMap.each {
+//        it = devMap
         if(debugEnabled) log.debug "${it.properties}"
         if(debugEnabled) log.debug "add child device ${it.id}"
-        devDetail = getDevDetail("$it.id")        
-        dev = addChildDevice("thebearmay", "Daikin One Thermostat", "${it.id}", [name:"$it.name",label:"$it.name",model:"$it.model", firmware:"$it.firmwareVersion", isComponent:false])
-        updateChild("$it.id", "C")
-//    }
+        devDetail = getDevDetail("$it.id")
+        if(!getChildDevice("${it.id}"))
+            dev = addChildDevice("thebearmay", "Daikin One Thermostat", "${it.id}", [name:"$it.name",label:"$it.name",model:"$it.model", firmware:"$it.firmwareVersion"])
+        updateChild("${it.id}", "C")
+    }
 }
 
 void updateChild(id, cOrF) {
@@ -192,6 +197,7 @@ void updateChild(id, cOrF) {
     circStr=["auto","on","circulate"]
   
     devDetail = getDevDetail("$id")
+    if(debugEnabled) log.debug "device detail: $devDetail"
     dev = getChildDevice("$id")
     degUnit = "°C"
     if(cOrF == "F") {
@@ -221,10 +227,15 @@ void updateChild(id, cOrF) {
     dev.updateAttr("tempOutdoor",devDetail.tempOutdoor,degUnit)
     dev.updateAttr("humidity",devDetail.humIndoor,"%")
     dev.updateAttr("humidOutdoor",devDetail.humOutdoor,"%") 
+    if(devDetail.equipmentStatus){
+    //HE - thermostatOperatingState - ENUM ["vent economizer", "pending cool", "cooling", "heating", "pending heat", "fan only", "idle"]
+    // Daikin 1: cool, 2: overcool for dehum, 3: heat, 4: fan, 5: idle   
+        stateConvList = ["idle","cooling","cooling","heating","fan only", "idle"]
+        dev.updateAttr("thermostatOperatingState", stateConvList[devDetail.equipmentStatus.toInteger()])
+    }
 }
 
 void sendPut(command, bodyMap){
-	authToken = getAuth()
     def bodyText = JsonOutput.toJson(bodyMap)
 	Map requestParams =
 	[

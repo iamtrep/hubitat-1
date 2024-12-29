@@ -17,13 +17,9 @@
  *                                1.0.2 - Use controllerType to determine Mesh status
  *    02Mar2022     thebearmay    1.0.3 - Add warning message for missing note text
  *    01Oct2024     thebearmay    2.0.0..2.0.4 - Rewrite of the UI
- *    20Oct2024                   2.0.5 - Add more debug
- *    21Oct2024                   2.0.6 - Change buttons on maintenance pages
- *    08Nov2024                   2.0.7 - Left Align device name
- *    17Nov2024                   2.0.8 - button styling
  */
 import groovy.transform.Field
-static String version()	{  return '2.0.8'  }
+static String version()	{  return '2.0.4'  }
 String appLocation() { return "http:${location.hub.localIP}/installedapp/configure/${app.id}/mainPage" }
 
 
@@ -106,10 +102,6 @@ String buttonLink(String btnName, String linkText, color = "#1A77C9", font = "15
 	"<div class='form-group'><input type='hidden' name='${btnName}.type' value='button'></div><div><div class='submitOnChange' onclick='buttonClick(this)' style='color:$color;cursor:pointer;font-size:$font'>$linkText</div></div><input type='hidden' name='settings[$btnName]' value=''>"
 }
 
-String buttonLink2(String btnName, String linkText, color = "#1A77C9", bkColor = "#FFFFFF", font = "15px") {
-	"<div class='form-group'><input type='hidden' name='${btnName}.type' value='button'></div><div><div class='submitOnChange' onclick='buttonClick(this)' style='border-radius:25px;color:$color;background-color:$bkColor;cursor:pointer;font-size:$font; border-style:outset;width:10em;'>$linkText</div></div><input type='hidden' name='settings[$btnName]' value=''>"
-}
-
 String btnIcon(String name) {
     return "<span class='p-button-icon p-button-icon-left pi " + name + "' data-pc-section='icon'></span>"
 }
@@ -155,7 +147,7 @@ String buildDeviceTable(){
             devName = "${it.displayName} <span style='color:red'>(HubMesh Device)</span>"
         else
             devName = it.displayName
-        str += "<td>$devSel</td><td style='text-align:left'><a href='http://${location.hub.localIP}/device/edit/${it.id}' target='_self'>${devName}</a><td class='tTip'>$hoverList$noteList</td>"
+        str += "<td>$devSel</td><td><a href='http://${location.hub.localIP}/device/edit/${it.id}' target='_self'>${devName}</a><td class='tTip'>$hoverList$noteList</td>"
         str += "</tr>"
     }
     String addNote = "<a href='${appLocation()}/noteMaint' target='_self' style='color:#007009;font-size:25px;'><b>+</b></a>"
@@ -175,12 +167,9 @@ def noteMaint(){
         }else if(dList.devList.size() == 1) {
             section("<h4>Single Device Maintenance<h4>", hideable:false, hidden: false){
                 paragraph "<span style='background-color:yellow;font-weight:bold'>Selected device: ${dList.devListName[0]}</span>"
-                saveBtn = buttonLink2("sdSave", "<b>Save</b>", "#FFFFFF", "#007000", "15px")
-                remBtn = buttonLink2("sdRem", "<b>Remove</b>", "#FFFFFF", "#700000", "15px")
-                paragraph "<style>td{text-align:center}</style><table><tr><td>$saveBtn</td><td>$remBtn</td></tr></table>"
-                //input "sdSave", "button", title:"<b>Save</b>", width:2, backgroundColor:'#007000',textColor:'#ffffff'
-                //input "sdRem", "button", title:"<b>Remove</b>", width:2, backgroundColor:'#700000',textColor:'#ffffff'
-                //input "hidden","hidden", title:"", width:8
+                input "sdSave", "button", title:"<b>Save</b>", width:2, backgroundColor:'#007000',textColor:'#ffffff'
+                input "sdRem", "button", title:"<b>Remove</b>", width:2, backgroundColor:'#700000',textColor:'#ffffff'
+                input "hidden","hidden", title:"", width:8
                 input "newKey", "text", title:"<b style='background-color:#87CECB'>New/Remove Key</b>",submitOnChange:true, width:6
                 if(newKey) app.updateSetting("newKey",[value:"${toCamelCase(newKey)}",type:"text"])
                 input "newVal", "text", title:"<b style='background-color:#87CECB'>New Note</b>",submitOnChange:true, width:6                               
@@ -195,19 +184,15 @@ def noteMaint(){
 
                 if (state.sdSave) {
                     state.sdSave = false
-                    if(debugEnabled)log.debug "Single save requested"
                     qryDevice.each{ dev ->
                         if("${dev.id}" == dList.devList[0]){
-                            if(debugEnabled)log.debug "newKey:$newKey newVal:$newval"
                             if(newKey && newVal){
-                                if(debugEnabled)log.debug "Updating $newKey:$newVal"
                                 dev.updateDataValue("$newKey", "$newVal")
                                 app.removeSetting("newKey")
                                 app.removeSetting("newVal")
                             }
                             settings.each{
                                 if("${it.key}".contains("sdKey")){
-                                    if(debugEnabled)log.debug "Updating previous setting ${it.key.substring(5,)}:${it.value}"
                                     dev.updateDataValue(it.key.substring(5,),it.value)
                                     app.removeSetting("${it.key}")
                                 }
@@ -219,10 +204,8 @@ def noteMaint(){
 
                 if (state.sdRem) {
                     state.sdRem = false
-                    if(debugEnabled)log.debug "Remove requested for $newKey"
                     qryDevice.each{ dev ->
                         if("${dev.id}" == devList[0]){
-                            if(debugEnabled)log.debug "Remove from ${dev.id}"
                             dev.removeDataValue(newKey)
                             app.removeSetting("sdKey$newKey")
                             app.removeSetting("newKey")
@@ -240,23 +223,18 @@ def noteMaint(){
         } else {
             section("<h4>Multi-Device Maintenance</h4>", hideable:false, hidden: false){
                 paragraph "<span style='background-color:yellow;font-weight:bold'>Selected devices: ${dList.devListName.sort()}</span>"
-                saveBtn = buttonLink2("mdSave", "<b>Save</b>", "#FFFFFF", "#007000", "15px")
-                remBtn = buttonLink2("mdRem", "<b>Remove</b>", "#FFFFFF", "#700000", "15px")
-                paragraph "<style>td{text-align:center}</style><table><tr><td>$saveBtn</td><td>$remBtn</td></tr></table>"
-//                input "mdSave", "button", title:"<b>Save</b>", width:2, backgroundColor:'#007000',textColor:'#ffffff'
-//                input "mdRem", "button", title:"<b>Remove</b>", width:2, backgroundColor:'#700000',textColor:'#ffffff'
-//                input "hidden","hidden", title:"", width:8
+                input "mdSave", "button", title:"<b>Save</b>", width:2, backgroundColor:'#007000',textColor:'#ffffff'
+                input "mdRem", "button", title:"<b>Remove</b>", width:2, backgroundColor:'#700000',textColor:'#ffffff'
+                input "hidden","hidden", title:"", width:8
                 input "newKey", "text", title:"<b style='background-color:#87CECB'>New/Remove/Update Key</b>",submitOnChange:true, width:6
                 if(newKey) app.updateSetting("newKey",[value:"${toCamelCase(newKey)}",type:"text"])
                 input "newVal", "text", title:"<b style='background-color:#87CECB'>New/Updated Note</b>",submitOnChange:true, width:6                               
               
                 if (state.mdSave) {
                     state.mdSave = false
-                    if(debugEnabled)log.debug "Save requested $newKey:$newVal"
                     qryDevice.each{ dev ->
                         if(state["devSel${dev.id}"]){
                             if(newKey && newVal){
-                                if(debugEnabled)log.debug "Updating $dev.id for $newKey:$newVal}"
                                 dev.updateDataValue("$newKey", "$newVal")                                
                             }
                         }
@@ -268,10 +246,8 @@ def noteMaint(){
 
                 if (state.mdRem) {
                     state.mdRem = false
-                    if(debugEnabled)log.debug "Remove requested"
                     qryDevice.each{ dev ->
                         if(state["devSel${dev.id}"]){
-                            if(debugEnabled)log.debug "Removing $newKey from ${dev.id}"
                             dev.removeDataValue(newKey)
                         }
                     }
@@ -324,7 +300,7 @@ def toCamelCase(init) {
 }
 
 def appButtonHandler(btn) {
-    if(debugEnabled)log.debug "$btn pressed"
+    log.debug "$btn pressed"
     switch(btn) {
 	case "addNote":
 /*            if(it.controllerType == "LNK") {

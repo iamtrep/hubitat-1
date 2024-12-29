@@ -1,0 +1,29 @@
+{
+ "packageName":"CSV Visualization",
+ "author":"Jean P. May, Jr.",
+ "version":"0.0.5",
+ "minimumHEVersion":"2.3.9.0",
+ "dateReleased":"2024-16-08",
+ "releaseNotes":"v0.0.5 - allow multiple CSV files as input (timeStamps must be able to convert to Long)\nv0.0.4 - handle files with device column\nv0.0.3 - handle non-long timestamp\nv0.0.2 - only show download for chart.js if file not in File Manager, show csv files as a dropdown, fix cloud interface\nv0.0.1 - Original Code",
+  "files": [
+  {
+     "id":"6e21a3eb-6a98-43c3-9f44-37756fc02473",
+     "name":"chart.js",
+     "namespace":"thebearmay",
+     "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/libraries/chart.js",
+     "required":true,
+     "description":"ChartJS Javascript Graphing Library"
+  }
+  ],
+ "apps": [
+  {
+     "id":"cfffe039-b4f4-4222-89d7-b3bfcc331cf4",
+     "name":"CSV Visualization",
+     "namespace":"thebearmay",
+     "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/apps/csvVisual.groovy",
+     "required":true,
+     "oauth":true,
+     "primary":true
+  }
+  ]
+}

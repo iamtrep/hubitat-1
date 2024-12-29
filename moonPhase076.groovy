@@ -27,13 +27,10 @@
  *    2021-10-03  thebearmay     Change refresh to sunset
  *    2024-09-29  thebearmay 	 Typo
  *    2024-10-01  thebearmay     Normalize the phase breakpoints to cause less of a jump in images
- *                LibraSun       Add SVG graphic and Emoji text output
- *    2024-10-05  LibraSun	     More SVG enhancements
- *    2024-12-15  thebearmay	 Fix sunset scheduling
  */
 
 import java.text.SimpleDateFormat
-static String version()	{  return '2.0.3'  }
+static String version()	{  return '0.7.6'  }
 
 metadata {
     definition (
@@ -44,13 +41,11 @@ metadata {
 	) {
         capability "Actuator"
         
-        attribute "moonPhase", "enum", ["New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous", "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"]
-	    attribute "moonPhaseNum", "number"
-	    attribute "lastQryDate", "string"
-        attribute "moonPhaseEmoji", "enum", ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"]
+        attribute "moonPhase", "string"
+		attribute "moonPhaseNum", "number"
+		attribute "lastQryDate", "string"
         attribute "moonPhaseTile", "string"
         attribute "moonPhaseImg", "string"
-        attribute "moonPhaseSvg", "string"
         attribute "html", "string"
         
         command "getPhase"
@@ -68,7 +63,7 @@ preferences {
 }
 
 def installed() {
-    log.trace "installed()"
+	log.trace "installed()"
 }
 
 def configure() {
@@ -84,7 +79,6 @@ def calcPhase (String dateStr){
 Long dateCheck(String dateStr) {
     try {
         Date cDate = Date.parse("yyyy-MM-dd HH:mm:ss",dateStr)
-        updateAttr("error", "Valid time " + cDate + " entered.")
         return cDate.getTime()
     } catch (ignored) {
         updateAttr("error", "Invalid date string use format yyyy-MM-dd HH:mm:ss")
@@ -112,13 +106,12 @@ void getPhase(Long cDate = now()) {
     
     if(phaseWork == 1.0) phaseWork = 0.0
     
-    updateAttr("moonPhaseNum", phaseWork)
+	updateAttr("moonPhaseNum", phaseWork)
     updateAttr("lastQryDate",sdf.format(cDate))
     
     String iconPath = "https://raw.githubusercontent.com/thebearmay/hubitat/main/moonPhaseRes/"
     if(iconPathOvr > " ") iconPath = iconPathOvr
     Integer imgNum
-    String phaseEmoji
     String phaseText
     //                                 .125               .250             .375              .500         .625              .750            .875
     List<String>imgList = ["New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous", "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"]
@@ -188,49 +181,8 @@ void getPhase(Long cDate = now()) {
     if(imgNum!=null) {
         phaseText = imgList[imgNum]
     } else phaseText = "Error - Out of Range"
-    
-    // Select emoji for moon phase
-    phaseEmoji = ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"][imgNum]
-    
-    // Generate SVG output from template
-    String svgString = """
-  <svg width="90%" viewBox="0 0 140 140">
-  <filter id="blur"><feGaussianBlur stdDeviation="4"/></filter>  
-  <mask id="arc">
-  <path d="M70,5 Arx1,65 180 0 sf1 70,135 Arx2,65 180 0 sf2 70,5 z" fill="#fff" filter="url(#blur)"/></mask>
-  <radialGradient id="shadow"><stop offset="10%" stop-color="#0007"/>
-  <stop offset="90%" stop-color="#000d"/></radialGradient>
-  <image x="6" y="4" width="130" href="${iconPath}lunar_surface.png"/>
-  <circle cx="70" cy="70" r="65" mask="url(#arc)" fill="url(#shadow)"/>
-  </svg>
-      """
-    Double rx1 = 65.0 // right limn radius
-    Integer sf1 = 1 // right limn sweep flag concave )
-    Double rx2 = 65.0  // left limn radius
-    Integer sf2 = 1 // left limn sweep flag concave (
-    if (phaseWork<=0.25) {
-        rx1 = rx1 * (1 - 4*phaseWork) // 70 🌑 .. 🌒 .. 0 🌓
-        // right limn moving, concave )
-        // left limn fixed, concave (
-    } else if (phaseWork>0.25 && phaseWork<=0.50) {
-        rx1 = rx1 * (4*phaseWork - 1) // 0 🌓 .. 🌔 .. 70 🌕
-        sf1 = 0 // right limn moving, vertical ► concave (
-        // left limn fixed, concave (
-    } else if (phaseWork>0.50 && phaseWork<=0.75) {
-        rx2 = rx2 * (3 - 4*phaseWork) // 70 🌕 .. 🌖 .. 0 🌗
-        // right limn fixed, concave )
-        sf2 = 0 // left limn moving, concave )
-    } else {
-        rx2 = rx2 * (4*phaseWork - 3) // 0 🌗 .. 🌘 .. 70 🌑
-        // right limn fixed, concave )
-        // left limn moving, vertical ► concave (
-    }
-    svgString = svgString.replace("rx1","$rx1").replace("rx2","$rx2").replace("sf1","$sf1").replace("sf2","$sf2")
-    
-    // Update device attributes
-    updateAttr("moonPhaseEmoji", phaseEmoji)
-    updateAttr("moonPhaseSvg", svgString)
-    updateAttr("moonPhaseImg", "<img class='moonPhase' src='${iconPath}moon-phase-icon-${imgNum}.png' />")
+        
+    updateAttr("moonPhaseImg", "<img class='moonPhase' src='${iconPath}moon-phase-icon-${imgNum}.png' />")    
     updateAttr("moonPhase", phaseText)
     String phaseIcon = "<div id='moonTile'><img class='moonPhase' src='${iconPath}moon-phase-icon-${imgNum}.png'><p class='small' style='text-align:center'>$phaseText</p></img></div>"
     if(!htmlVtile)
@@ -240,10 +192,9 @@ void getPhase(Long cDate = now()) {
     
     HashMap riseAndSet = getSunriseAndSunset()
     if(riseAndSet.sunset < new Date()){
-        riseAndSet = getSunriseAndSunset(sunsetOffset: "+24:00")
+        getSunriseAndSunset(sunsetOffset: "+24:00")
     }
     unschedule()
-    //log.debug "${riseAndSet.sunset}"
     runOnce(riseAndSet.sunset, getPhase)
 }
 
@@ -260,14 +211,12 @@ def initialize(){
 }
 
 def updated(){
-    log.trace "updated()"
+	log.trace "updated()"
     HashMap riseAndSet = getSunriseAndSunset()
-    //log.debug "${new Date()} ${riseAndSet.sunset < new Date()}"
     if(riseAndSet.sunset < new Date()){
-        riseAndSet = getSunriseAndSunset(sunsetOffset: "+24:00")
+        getSunriseAndSunset(sunsetOffset: "+24:00")
     }
     unschedule()
-    //log.debug "${riseAndSet.sunset} "
     runOnce(riseAndSet.sunset, getPhase)
 	if(debugEnable) runIn(1800,logsOff)
 }

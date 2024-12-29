@@ -309,6 +309,40 @@
         "Monitoring",
         "Tools & Utilities"
        ]
+    },
+    {
+      "id":"e4856d8f-faa8-4d85-9772-72901167fef6",
+      "name":"CSV Visualization",
+      "category":"Utility",
+      "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/csvVisualManifest.json",
+      "description":"CSV Visualization - Local graphing of CSV files uitlizing the chart.js library"
+    },
+    {
+      "id":"d20fd665-34ca-42f6-bbc9-866eb862cfca",
+      "name":"Hub Image Proxy",
+      "category":"Utility",
+      "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/hubProxyManifest.json",
+      "description":"Serves files from the hub File Manager, thus permitting images and text files on the hub to be viewed//referenced via the cloud interface."
+    },
+    {
+      "id":"4c231540-9ff4-4a64-b067-8df2c0781f3c",
+      "name":"Hub Updater v2",
+      "category":"Utility",
+      "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/manifests/hubUpdaterV2Manifest.json",
+      "description":"Hub Updater v2 creates a virtual device that allows a single button push to request HE firmware updates for multiple HubMeshed hubs.",
+      "tags":[
+        "Misc. Devices"
+       ]
+    },
+    {
+      "id":"879b6db7-00c3-4a85-b66d-36c8d9b57d69",
+      "name":"Govee Effect Player",
+      "category":"Utility",
+      "location":"https://raw.githubusercontent.com/thebearmay/hubitat/refs/heads/main/manifests/gEffectsManifest.json",
+      "description":"Govee Effects Player",
+      "tags":[
+        "Lights & Switches"
+       ]
     }
   ]
 }

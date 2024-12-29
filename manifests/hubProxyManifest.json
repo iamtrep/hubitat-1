@@ -1,0 +1,19 @@
+{
+ "packageName":"Hub Image Proxy",
+ "author":"Jean P. May, Jr.",
+ "version":"0.0.4",
+ "minimumHEVersion":"2.3.9.160",
+ "dateReleased":"2024-11-16",
+ "releaseNotes":"v0.0.4 - add getAttribute endpoint\nv0.0.3 -add getURL endpoint\nv0.0.2 - add UTF-8 for HTML and text files\nv0.0.1 - Original Code",
+ "apps": [
+  {
+     "id":"0ccef23b-1d00-4477-9956-aec55fd05bad",
+     "name":"Hub Image Proxy",
+     "namespace":"thebearmay",
+     "location":"https://raw.githubusercontent.com/thebearmay/hubitat/main/apps/hubProxy.groovy",
+     "required":true,
+     "oauth":true,
+     "primary":true
+  }
+  ]
+}
